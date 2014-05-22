@@ -4,10 +4,10 @@ import java.util.Arrays;
 
 class BitVectorImpl {
 
-  /** 基本単位 */
-  private static final int     UNIT             = 64;
+  /** 1ブロックのビットサイズ */
+  private static final int     BLOCK_SIZE       = 64;
 
-  /** ビットマスク */
+  /** 64bit用ビットマスク */
   static private final long[]  BIT_MASK64       = { 0x8000000000000000L, 0x4000000000000000L, 0x2000000000000000L, 0x1000000000000000L, 0x0800000000000000L,
       0x0400000000000000L, 0x0200000000000000L, 0x0100000000000000L, 0x0080000000000000L, 0x0040000000000000L, 0x0020000000000000L, 0x0010000000000000L,
       0x0008000000000000L, 0x0004000000000000L, 0x0002000000000000L, 0x0001000000000000L, 0x0000800000000000L, 0x0000400000000000L, 0x0000200000000000L,
@@ -19,12 +19,11 @@ class BitVectorImpl {
       0x0000000000000200L, 0x0000000000000100L, 0x0000000000000080L, 0x0000000000000040L, 0x0000000000000020L, 0x0000000000000010L, 0x0000000000000008L,
       0x0000000000000004L, 0x0000000000000002L, 0x0000000000000001L };
 
+  /** 16bit用ビットマスク */
   private static int[]         BIT_MASK16       = { 0x8000, 0x4000, 0x2000, 0x1000, 0x0800, 0x0400, 0x0200, 0x0100, 0x0080, 0x0040, 0x0020, 0x0010, 0x0008,
       0x0004, 0x0002, 0x0001                   };
 
-  /**
-   * int 8bit用のビットマスク
-   */
+  /** 8bit用のビットマスク */
   private static int[]         BIT_MASK8        = { 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01 };
 
   /** 64bitポップカウント用のビットマスク */
@@ -108,45 +107,45 @@ class BitVectorImpl {
     return popcount;
   }
 
-  // ---------------------------------------------------
-
   /** デフォルトのキャパシティ */
   static final int         DEFAULT_CAPACITY = 1024;
 
   /** インデックス用ビットブロック */
-  private long[]           bits_;
+  private long[]           blocks_;
 
-  /**
-   * rank用索引
-   */
+  /*** rank用索引 */
   private long[]           rank_;
 
-  /**
-   * select用索引
-   */
+  /** select用索引 */
   private long[]           select_;
 
-  /** １スモールブロックのビットサイズ */
+  /** rank索引１スモールブロックのビットサイズ */
   private static final int SB_SIZE          = 64;
 
-  /** 1ラージブロックのビットサイズ */
+  /** rank索引 1ラージブロックのビットサイズ */
   private static final int LB_SIZE          = 256;
 
+  /** rank索引ラージブロック用のビットマスク */
   private static long      OFFSET_MASK      = 0xFFFFFFFF00000000L;
+
+  /** rank索引スモールブロック用のビットマスク */
   private static long[]    SB_MASK          = { 0x00000000FF000000L, 0x0000000000FF0000L, 0x000000000000FF00L, 0x000000000000FF00L };
 
   /** 1の総数 */
   private int              one_;
 
+  private int              modified_;
+
   /**
    * デフォルトのキャパシティで初期化する。
    */
   public BitVectorImpl() {
-    bits_ = new long[DEFAULT_CAPACITY / UNIT + 1];
+    blocks_ = new long[DEFAULT_CAPACITY / BLOCK_SIZE + 1];
     rank_ = new long[DEFAULT_CAPACITY / LB_SIZE + 1];
     select_ = new long[DEFAULT_CAPACITY / LB_SIZE + 1];
     initSelect(1);
     one_ = 0;
+    modified_ = -1;
   }
 
   /**
@@ -156,11 +155,12 @@ class BitVectorImpl {
    *          キャパシティ
    */
   public BitVectorImpl(int capacity) {
-    bits_ = new long[capacity / UNIT + 1];
+    blocks_ = new long[capacity / BLOCK_SIZE + 1];
     rank_ = new long[capacity / LB_SIZE + 1];
     select_ = new long[capacity / LB_SIZE + 1];
     initSelect(1);
     one_ = 0;
+    modified_ = -1;
   }
 
   /**
@@ -173,11 +173,11 @@ class BitVectorImpl {
   public final int get(int i) {
     if (i < 0)
       return 0;
-    int x = i / UNIT;
-    int y = i % UNIT;
-    if (x >= bits_.length)
+    int x = i / BLOCK_SIZE;
+    int y = i % BLOCK_SIZE;
+    if (x >= blocks_.length)
       return 0;
-    return ((bits_[x] & BIT_MASK64[y]) != 0) ? 1 : 0;
+    return ((blocks_[x] & BIT_MASK64[y]) != 0) ? 1 : 0;
   }
 
   /**
@@ -185,43 +185,73 @@ class BitVectorImpl {
    *
    * @param i
    *          インデックス。負の場合はIllegalArgumentExceptionをスロー
-   * @return i番目のビットを１にした後のrank(i)を返す
    */
-  public final int set(int i) {
+  public final void set(int i) {
     if (i < 0)
       throw new IllegalArgumentException("The index is negative.");
     resize(i);
 
-    int x = i / UNIT;
-    int y = i % UNIT;
+    int x = i / BLOCK_SIZE;
+    int y = i % BLOCK_SIZE;
 
-    long m = bits_[x];
+    long m = blocks_[x];
     if ((m & BIT_MASK64[y]) == 0) {
-
-      // updates lbs_
-      bits_[x] |= BIT_MASK64[y];
-      updatesRank(i);
-      one_++;
-
-      // updates select_
-      int r1 = rank1(i);
-      if ((r1 + 1) % LB_SIZE == 0)
-        select_[(r1 + 1) / LB_SIZE] = ((select_[(r1 + 1) / LB_SIZE] & 0xFFFFFFFF00000000L) | (long) i);
-
-      int r0 = i - r1;
-      if ((r0 + 1) % LB_SIZE == 0) {
-        select_[(r0 + 1) / LB_SIZE] = (select_[(r0 + 1) / LB_SIZE] & 0x00000000FFFFFFFFL) | ((long) i << 32);
+      blocks_[x] |= BIT_MASK64[y];
+      if (modified_ < 0) {
+        modified_ = i;
+      } else {
+        if (i < modified_)
+          modified_ = i;
       }
-      return r1;
+      one_++;
     }
-    return rank1(i);
+  }
+
+  private void build(){
+    if (modified_ < 0)
+      return ;
+    buildRankIndex(modified_);
+    buildSelectIndex(modified_);
+    modified_ = -1;
+  }
+
+  private void buildRankIndex(int i) {
+    int m = blocks_.length / LB_SIZE;
+    assert(m < rank_.length);
+    int k = i / LB_SIZE;
+    int offset = offset(k);
+    int s = k * LB_SIZE / SB_SIZE;
+    for (; k < rank_.length; k++) {
+      int sb0 = (s < blocks_.length) ? popCount(blocks_[s++]) : 0;
+      int sb1 = (s < blocks_.length) ? popCount(blocks_[s++]) : 0;
+      int sb2 = (s < blocks_.length) ? popCount(blocks_[s++]) : 0;
+      int sb3 = (s < blocks_.length) ? popCount(blocks_[s++]) : 0;
+      rank_[k] = ((long) offset << 32) | ((long) sb0 << 24) | ((long) (sb0 + sb1) << 16) | ((long) (sb0 + sb1 + sb2) << 8);
+      offset = offset + sb0 + sb1 + sb2 + sb3;
+    }
+  }
+
+  private void buildSelectIndex(int i) {
+    int k = 1;
+
+    for(int m = 0; m < rank_.length; m++){
+      int j = k * LB_SIZE;
+      int r0 = offset(m);
+      int r1 = one_;
+      if (m < rank_.length - 1)
+        r1 = offset(m + 1);
+      if (r0 < j && j <= r1) {
+        select_[k] = ((select_[k] & 0xFFFFFFFF00000000L) | select1inLB(k * LB_SIZE, m));
+        k++;
+      }
+    }
   }
 
   /**
-   * i番目まで(iは含まない)に出現する1の個数
+   * 先頭からi番目まで(iは含まない)に出現する1の個数を求める　
    *
    * @param i
-   *          0未満の場合、IllegalArgumentExceptionをスロー
+   *          負の場合、IllegalArgumentExceptionをスロー
    * @return i番目までに出現する1の個数
    */
   int rank1(int i) {
@@ -229,9 +259,12 @@ class BitVectorImpl {
       throw new IllegalArgumentException("The index is negative.");
     if (i == 0)
       return 0;
+
     int k = i / LB_SIZE;
     if (k >= rank_.length)
       return one_;
+
+    build();
 
     int rank = offset(k);
 
@@ -247,12 +280,19 @@ class BitVectorImpl {
     if (y == 3)
       rank += (int) ((sb & SB_MASK[2]) >>> 8);
 
-    if ((i / UNIT) >= bits_.length)
+    if ((i / BLOCK_SIZE) >= blocks_.length)
       return rank;
 
-    return rank + popCount(bits_[i / UNIT] & POP_COUNT_MASK64[i % UNIT]);
+    return rank + popCount(blocks_[i / BLOCK_SIZE] & POP_COUNT_MASK64[i % BLOCK_SIZE]);
   }
 
+  /**
+   * 先頭からi番目までの0の個数（i番目は含まない）を求める。
+   *
+   * @param i
+   *          インデックス。iが負の場合はIllegalArgumentExceptionをスロー
+   * @return 先頭からi番目までの0の個数
+   */
   int rank0(int i) {
     if (i < 0)
       throw new IllegalArgumentException("The index is negative.");
@@ -271,18 +311,18 @@ class BitVectorImpl {
   int select1(int j) {
     if (j < 1)
       throw new IllegalArgumentException("The argument is less than 1.");
+
     if (one_ < j)
       return -1;
-    int k = (j - 1) / LB_SIZE;
-    if (k >= rank_.length)
-      return -1;
+
+    build();
 
     int p = j / LB_SIZE;
     if (j % LB_SIZE == 0)
       return select1Index(p);
 
     int b = select1Index(p) / LB_SIZE;
-    int e = select1Index(p+1) / LB_SIZE;
+    int e = select1Index(p + 1) / LB_SIZE;
     int m = 0;
 
     // LB(256bit)毎の二分探索
@@ -299,7 +339,10 @@ class BitVectorImpl {
     if (offset(e) < j)
       m = e;
 
-    // LB内のSBを二分探索
+    return select1inLB(j, m);
+  }
+
+  private int select1inLB(int j, int m) {
     long lb = rank_[m];
 
     int s = offset(m);
@@ -310,20 +353,32 @@ class BitVectorImpl {
     if (j <= s + sb1) {
       if (j <= s + sb0) {
         int i = m * LB_SIZE;
-        return i + select1Long64(bits_[i / UNIT], j - s);
+        return i + select1Long64(blocks_[i / BLOCK_SIZE], j - s);
       } else {
         int i = m * LB_SIZE + SB_SIZE;
-        return i + select1Long64(bits_[i / UNIT], j - s - sb0);
+        return i + select1Long64(blocks_[i / BLOCK_SIZE], j - s - sb0);
       }
     } else {
       if (j <= s + sb2) {
         int i = m * LB_SIZE + SB_SIZE * 2;
-        return i + select1Long64(bits_[i / UNIT], j - s - sb1);
+        return i + select1Long64(blocks_[i / BLOCK_SIZE], j - s - sb1);
       } else {
         int i = m * LB_SIZE + SB_SIZE * 3;
-        return i + select1Long64(bits_[i / UNIT], j - s - sb2);
+        return i + select1Long64(blocks_[i / BLOCK_SIZE], j - s - sb2);
       }
     }
+  }
+
+  /**
+   * j番目の0が出現する位置（インデックス）を返す
+   *
+   * @param j
+   *          jが1未満はIllegalArgumentExceptionをスロー
+   * @return j番目の0が出現する位置（インデックス）。存在しない場合は-1
+   */
+  int select0(int j) {
+    // TODO 実装すること
+    return 0;
   }
 
   private int select1Long64(long bit, int k) {
@@ -377,9 +432,9 @@ class BitVectorImpl {
   }
 
   private void resize(int i) {
-    int s = i / UNIT;
-    if (s >= bits_.length)
-      bits_ = Arrays.copyOf(bits_, s + 1);
+    int s = i / BLOCK_SIZE;
+    if (s >= blocks_.length)
+      blocks_ = Arrays.copyOf(blocks_, s + 1);
 
     int m = i / LB_SIZE;
     if (m >= rank_.length) {
@@ -396,27 +451,10 @@ class BitVectorImpl {
     }
   }
 
-  private void updatesRank(int i) {
-    int k = i / LB_SIZE;
-    for (int j = k + 1; j < rank_.length; j++) {
-      rank_[j] = rank_[j] + 0x0000000100000000L;
-    }
-
-    int y = (i % LB_SIZE) / SB_SIZE;
-
-    if (y == 0) {
-      rank_[k] = rank_[k] + 0x0000000001010100L;
-    } else if (y == 1) {
-      rank_[k] = rank_[k] + 0x0000000000010100L;
-    } else if (y == 2) {
-      rank_[k] = rank_[k] + 0x0000000000000100L;
-    }
-  }
-
   private int select1Index(int k) {
     int i = (int) (select_[k] & 0x00000000FFFFFFFFL);
     if (i < 0)
-      return bits_.length * UNIT - 1;
+      return blocks_.length * BLOCK_SIZE - 1;
     return i;
   }
 }
