@@ -1,7 +1,5 @@
 package com.github.dyamah.jbv.impl;
 
-import java.util.Arrays;
-
 class BitVectorImpl {
 
   /** 1ブロックのビットサイズ */
@@ -431,22 +429,28 @@ class BitVectorImpl {
     return (int) ((rank_[k] & OFFSET_MASK) >>> 32);
   }
 
+  private long[] arraycopy(long[] src, int size){
+    long[] dest = new long[size];
+    System.arraycopy(src, 0, dest, 0, src.length);
+    return dest ;
+  }
+
   private void resize(int i) {
     int s = i / BLOCK_SIZE;
     if (s >= blocks_.length)
-      blocks_ = Arrays.copyOf(blocks_, s + 1);
+      blocks_ = arraycopy(blocks_, s + 1);
 
     int m = i / LB_SIZE;
     if (m >= rank_.length) {
       s = rank_.length;
       long n = (long) one_ << 32;
-      rank_ = Arrays.copyOf(rank_, m + 1);
+      rank_ = arraycopy(rank_, m + 1);
       for (int k = s; k < rank_.length; k++)
         rank_[k] = n;
     }
     if (m >= select_.length - 1) {
       s = select_.length;
-      select_ = Arrays.copyOf(select_, m + 2);
+      select_ = arraycopy(select_, m + 2);
       initSelect(s);
     }
   }
