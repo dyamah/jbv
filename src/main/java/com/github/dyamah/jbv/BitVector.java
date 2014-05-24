@@ -1,39 +1,30 @@
 package com.github.dyamah.jbv;
 
 /**
- * 簡潔データ構造を用いたベクター
+ * 簡潔データ構造ビットベクター
  *
  * @author Hiroyasu Yamada
- *
- * @param <E>
- *          要素の型
  */
-public interface BitVector<E> {
+public interface BitVector {
 
   /**
-   * i番目の要素を返す.
+   * i番目のビット値を返す.
    *
-   * @param i
-   *          インデックス
-   * @return i番目の要素。範囲外や要素が設定されていない場合はnullを返す
+   * @param i インデックス。負の場合はIndexOutOfBoundsExceptionをスロー
+   * @return i番目のビット値
    */
-  E get(int i);
+  int get(int i);
 
   /**
-   * i番目に要素を設定する。
+   * i番目のビットを1に設定する。
    *
-   * @param i
-   *          インデックス。負の数は IllegalArgumentExceptionをスロー
-   * @param element
-   *          設定する要素 nullは IllegalArgumentExceptionをスロー
+   * @param j インデックス。負の場合はIndexOutOfBoundsExceptionをスロー
    */
-  void set(int i, E element);
+  void set(int i);
 
   /**
-   * 設定した要素数を返す。
-   *
-   * @return 設定された要素数
+   * このビットベクトル内で１の立っている個数を返す
+   * @return １の立っている個数
    */
-  int size();
-
+  int popCount();
 }
