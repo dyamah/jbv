@@ -17,9 +17,6 @@ class BitVectorImpl {
       0x0000000000000200L, 0x0000000000000100L, 0x0000000000000080L, 0x0000000000000040L, 0x0000000000000020L, 0x0000000000000010L, 0x0000000000000008L,
       0x0000000000000004L, 0x0000000000000002L, 0x0000000000000001L };
 
-  /** 16bit用ビットマスク */
-  private static int[]         BIT_MASK16       = { 0x8000, 0x4000, 0x2000, 0x1000, 0x0800, 0x0400, 0x0200, 0x0100, 0x0080, 0x0040, 0x0020, 0x0010, 0x0008,
-      0x0004, 0x0002, 0x0001                   };
 
   /** 8bit用のビットマスク */
   private static int[]         BIT_MASK8        = { 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01 };
@@ -35,36 +32,6 @@ class BitVectorImpl {
       0xFFFFFFFFFFFE0000L, 0xFFFFFFFFFFFF0000L, 0xFFFFFFFFFFFF8000L, 0xFFFFFFFFFFFFC000L, 0xFFFFFFFFFFFFE000L, 0xFFFFFFFFFFFFF000L, 0xFFFFFFFFFFFFF800L,
       0xFFFFFFFFFFFFFC00L, 0xFFFFFFFFFFFFFE00L, 0xFFFFFFFFFFFFFF00L, 0xFFFFFFFFFFFFFF80L, 0xFFFFFFFFFFFFFFC0L, 0xFFFFFFFFFFFFFFE0L, 0xFFFFFFFFFFFFFFF0L,
       0xFFFFFFFFFFFFFFF8L, 0xFFFFFFFFFFFFFFFCL, 0xFFFFFFFFFFFFFFFEL };
-
-  /** 16bit用ポップカウントテーブル */
-  static private final int[]   POP_COUNT_TABLE16;
-  static {
-    POP_COUNT_TABLE16 = new int[65536];
-    for (int n = 0; n < POP_COUNT_TABLE16.length; n++) {
-      int popcount = 0;
-      for (int i = 0; i < 16; i++) {
-        if ((n & BIT_MASK16[i]) == 0)
-          continue;
-        popcount++;
-      }
-      POP_COUNT_TABLE16[n] = popcount;
-    }
-  }
-
-  /** 8it用ポップカウントテーブル */
-  static private final int[]   POP_COUNT_TABLE8;
-  static {
-    POP_COUNT_TABLE8 = new int[256];
-    for (int n = 0; n < POP_COUNT_TABLE8.length; n++) {
-      int popcount = 0;
-      for (int i = 0; i < 8; i++) {
-        if ((n & BIT_MASK8[i]) == 0)
-          continue;
-        popcount++;
-      }
-      POP_COUNT_TABLE8[n] = popcount;
-    }
-  }
 
   /**
    * select1用の8bitテーブル
@@ -85,24 +52,6 @@ class BitVectorImpl {
         }
       }
     }
-  }
-
-  /**
-   * xのポップカウントを求める
-   *
-   * @param x
-   *          入力値
-   * @return ポップカウント（ビットが立っている個数）
-   */
-  static final int popCount(long x) {
-    int popcount = POP_COUNT_TABLE16[(int) (x & 0xffff)];
-    x = x >>> 16;
-    popcount += POP_COUNT_TABLE16[(int) (x & 0xffff)];
-    x = x >>> 16;
-    popcount += POP_COUNT_TABLE16[(int) (x & 0xffff)];
-    x = x >>> 16;
-    popcount += POP_COUNT_TABLE16[(int) (x & 0xffff)];
-    return popcount;
   }
 
   /** デフォルトのキャパシティ */
@@ -220,10 +169,10 @@ class BitVectorImpl {
     int offset = offset(k);
     int s = k * LB_SIZE / SB_SIZE;
     for (; k < rank_.length; k++) {
-      int sb0 = (s < blocks_.length) ? popCount(blocks_[s++]) : 0;
-      int sb1 = (s < blocks_.length) ? popCount(blocks_[s++]) : 0;
-      int sb2 = (s < blocks_.length) ? popCount(blocks_[s++]) : 0;
-      int sb3 = (s < blocks_.length) ? popCount(blocks_[s++]) : 0;
+      int sb0 = (s < blocks_.length) ? Long.bitCount(blocks_[s++]) : 0;
+      int sb1 = (s < blocks_.length) ? Long.bitCount(blocks_[s++]) : 0;
+      int sb2 = (s < blocks_.length) ? Long.bitCount(blocks_[s++]) : 0;
+      int sb3 = (s < blocks_.length) ? Long.bitCount(blocks_[s++]) : 0;
       rank_[k] = ((long) offset << 32) | ((long) sb0 << 24) | ((long) (sb0 + sb1) << 16) | ((long) (sb0 + sb1 + sb2) << 8);
       offset = offset + sb0 + sb1 + sb2 + sb3;
     }
@@ -281,7 +230,7 @@ class BitVectorImpl {
     if ((i / BLOCK_SIZE) >= blocks_.length)
       return rank;
 
-    return rank + popCount(blocks_[i / BLOCK_SIZE] & POP_COUNT_MASK64[i % BLOCK_SIZE]);
+    return rank + Long.bitCount(blocks_[i / BLOCK_SIZE] & POP_COUNT_MASK64[i % BLOCK_SIZE]);
   }
 
   /**
@@ -385,8 +334,8 @@ class BitVectorImpl {
     assert (k <= 64);
     int n0 = (int) ((bit & 0xFFFF000000000000L) >>> 48);
     int n1 = (int) ((bit & 0x0000FFFF00000000L) >>> 32);
-    int pc0 = POP_COUNT_TABLE16[n0];
-    int pc1 = POP_COUNT_TABLE16[n1];
+    int pc0 = Integer.bitCount(n0);
+    int pc1 = Integer.bitCount(n1);
 
     if (k <= pc0 + pc1) {
       if (k <= pc0) {
@@ -397,7 +346,7 @@ class BitVectorImpl {
     } else {
       int n2 = (int) ((bit & 0x00000000FFFF0000L) >>> 16);
       int n3 = (int) ((bit & 0x000000000000FFFFL));
-      int pc2 = POP_COUNT_TABLE16[n2];
+      int pc2 = Integer.bitCount(n2);
       if (k <= pc0 + pc1 + pc2) {
         return 32 + select1Int16(n2, k - pc0 - pc1);
       } else {
@@ -411,7 +360,7 @@ class BitVectorImpl {
     assert (k <= 16);
     assert (k > 0);
     int h = (bit & 0xFF00) >>> 8;
-    int hp = POP_COUNT_TABLE8[h];
+    int hp = Integer.bitCount(h);
     if (k <= hp)
       return SELECT1_TABLE[h][k - 1];
     int l = bit & 0x00FF;
